@@ -1,6 +1,6 @@
 --- @since 25.5.31
--- wlclipboard.yazi: copy files to Wayland clipboard
--- Single image  -> raw bytes via copyq (serves all image MIME types to XWayland apps)
+-- wlclipboard: copy files to Wayland clipboard
+-- Single image  -> converts to PNG via magick, copies via copyq
 -- Anything else -> file:// URI list via wl-copy
 
 local selected_or_hovered = ya.sync(function(_)
@@ -29,20 +29,12 @@ local function get_mime(path)
 	return out and out.stdout:gsub("%s+$", "") or nil
 end
 
--- Animated formats need first-frame extraction to PNG before copyq,
--- otherwise copyq only offers image/gif which Slack/Discord can't paste.
-local NEEDS_CONVERT = { ["image/gif"] = true, ["image/webp"] = true }
-
--- Copy image to clipboard via copyq (advertises all image MIME types).
--- For gif/webp: extracts first frame as PNG via magick.
--- All done in one sh command to avoid os.tmpname/io.open (broken in yazi async).
-local function copy_image(path, mime)
-	local cmd
-	if NEEDS_CONVERT[mime] then
-		cmd = "tmp=$(mktemp --suffix=.png) && magick '" .. path .. "[0]' png:\"$tmp\" && copyq copy image/png - < \"$tmp\"; rm -f \"$tmp\""
-	else
-		cmd = "copyq copy " .. mime .. " - < '" .. path .. "'"
-	end
+-- Convert any image to PNG and copy via copyq.
+-- magick handles gif (first frame), webp, jpeg, png, etc.
+-- copyq advertises all image MIME types so XWayland apps (Slack/Discord) can paste.
+-- No temp files: magick outputs to stdout, piped to copyq stdin.
+local function copy_image(path)
+	local cmd = "magick '" .. path .. "[0]' png:- | copyq copy image/png -"
 	local status = Command("sh"):arg({ "-c", cmd }):spawn():wait()
 	return status and status.success
 end
@@ -64,7 +56,7 @@ return {
 		if #urls == 1 then
 			local mime = get_mime(urls[1])
 			if mime and mime:find("^image/") then
-				if copy_image(urls[1], mime) then
+				if copy_image(urls[1]) then
 					return notify("Copied image: " .. urls[1]:match("[^/]+$"))
 				end
 				return notify("Failed to copy image", "error")
