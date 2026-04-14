@@ -29,22 +29,21 @@ local function get_mime(path)
 	return out and out.stdout:gsub("%s+$", "") or nil
 end
 
--- Animated formats (gif, webp) need conversion to PNG first frame,
+-- Animated formats need first-frame extraction to PNG before copyq,
 -- otherwise copyq only offers image/gif which Slack/Discord can't paste.
 local NEEDS_CONVERT = { ["image/gif"] = true, ["image/webp"] = true }
 
--- Copy image via copyq. Converts animated formats to PNG first frame.
+-- Copy image to clipboard via copyq (advertises all image MIME types).
+-- For gif/webp: extracts first frame as PNG via magick.
+-- All done in one sh command to avoid os.tmpname/io.open (broken in yazi async).
 local function copy_image(path, mime)
-	local src = path
+	local cmd
 	if NEEDS_CONVERT[mime] then
-		src = os.tmpname() .. ".png"
-		local conv = Command("magick"):arg({ path .. "[0]", "png:" .. src }):spawn():wait()
-		if not conv or not conv.success then return false end
-		mime = "image/png"
+		cmd = "tmp=$(mktemp --suffix=.png) && magick '" .. path .. "[0]' png:\"$tmp\" && copyq copy image/png - < \"$tmp\"; rm -f \"$tmp\""
+	else
+		cmd = "copyq copy " .. mime .. " - < '" .. path .. "'"
 	end
-	local cmd = "copyq copy " .. mime .. " - < '" .. src .. "'"
 	local status = Command("sh"):arg({ "-c", cmd }):spawn():wait()
-	if src ~= path then os.remove(src) end
 	return status and status.success
 end
 
@@ -62,7 +61,6 @@ return {
 		local urls = selected_or_hovered()
 		if #urls == 0 then return notify("No file selected", "warn") end
 
-		-- Single image -> copy via copyq (multi-type, XWayland-compatible)
 		if #urls == 1 then
 			local mime = get_mime(urls[1])
 			if mime and mime:find("^image/") then
@@ -73,7 +71,6 @@ return {
 			end
 		end
 
-		-- Otherwise -> file:// URI list
 		if copy_uri_list(urls) then
 			local msg = #urls == 1 and urls[1]:match("[^/]+$") or (#urls .. " file(s)")
 			return notify("Copied: " .. msg)
