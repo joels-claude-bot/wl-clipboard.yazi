@@ -29,11 +29,22 @@ local function get_mime(path)
 	return out and out.stdout:gsub("%s+$", "") or nil
 end
 
--- Use copyq for images: advertises all image MIME types (png, bmp, jpeg...)
--- Plain wl-copy only offers one type which XWayland apps (Brave/Slack) can't see.
+-- Animated formats (gif, webp) need conversion to PNG first frame,
+-- otherwise copyq only offers image/gif which Slack/Discord can't paste.
+local NEEDS_CONVERT = { ["image/gif"] = true, ["image/webp"] = true }
+
+-- Copy image via copyq. Converts animated formats to PNG first frame.
 local function copy_image(path, mime)
-	local cmd = "copyq copy " .. mime .. " - < '" .. path .. "'"
+	local src = path
+	if NEEDS_CONVERT[mime] then
+		src = os.tmpname() .. ".png"
+		local conv = Command("magick"):arg({ path .. "[0]", "png:" .. src }):spawn():wait()
+		if not conv or not conv.success then return false end
+		mime = "image/png"
+	end
+	local cmd = "copyq copy " .. mime .. " - < '" .. src .. "'"
 	local status = Command("sh"):arg({ "-c", cmd }):spawn():wait()
+	if src ~= path then os.remove(src) end
 	return status and status.success
 end
 
