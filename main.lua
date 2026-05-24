@@ -24,18 +24,6 @@ local function notify(msg, level)
 	ya.notify({ title = "System Clipboard", content = msg, level = level or "info", timeout = 5 })
 end
 
-local function get_mime(path)
-	local out = Command("file"):arg({ "--brief", "--mime-type", path }):stdout(Command.PIPED):output()
-	return out and out.stdout:gsub("%s+$", "") or nil
-end
-
-local function copy_image(path, mime)
-	local status = Command("sh")
-		:arg({ "-c", "wl-copy --type '" .. mime .. "' < '" .. path:gsub("'", "'\\''") .. "'" })
-		:spawn():wait()
-	return status and status.success
-end
-
 local function copy_uri_list(paths)
 	local formatted = ""
 	for _, path in ipairs(paths) do
@@ -48,16 +36,8 @@ end
 return {
 	entry = function()
 		local urls = selected_or_hovered()
-		if #urls == 0 then return notify("No file selected", "warn") end
-
-		if #urls == 1 then
-			local mime = get_mime(urls[1])
-			if mime and mime:find("^image/") then
-				if copy_image(urls[1], mime) then
-					return notify("Copied image: " .. urls[1]:match("[^/]+$"))
-				end
-				return notify("Failed to copy image", "error")
-			end
+		if #urls == 0 then
+			return notify("No file selected", "warn")
 		end
 
 		if copy_uri_list(urls) then
